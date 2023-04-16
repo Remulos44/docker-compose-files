@@ -31,7 +31,7 @@ services:
       # EULA: "TRUE"
       # TYPE: "PURPUR"
       # PURPUR_BUILD: "LATEST"
-      # RCON_PASSWORD: "aashapon44"
+      # RCON_PASSWORD: $RCON_PASSWORD
       # MEMORY: ""
       # INIT_MEMORY: "1G"
       # MAX_MEMORY: "4G"
@@ -47,7 +47,7 @@ services:
       EULA: "TRUE"
       TYPE: "PURPUR"
       PURPUR_BUILD: "LATEST"
-      RCON_PASSWORD: "aashapon44"
+      RCON_PASSWORD: $RCON_PASSWORD
       MEMORY: ""
       INIT_MEMORY: "1G"
       MAX_MEMORY: "4G"
@@ -72,8 +72,8 @@ services:
       - "4326:4326"
       - "4327:4327"
     environment:
-      RWA_USERNAME: "admin"
-      RWA_PASSWORD: "aashapon44"
+      RWA_USERNAME: $RWA_USERNAME
+      RWA_PASSWORD: $RWA_PASSWORD
       RWA_ADMIN: "TRUE"
       # RWA_WEBSOCKET_URL: "ws://ws.rcon.remulos.cc"
       # RWA_WEBSOCKET_URL_SSL: "wss://ws.rcon.remulos.cc"
