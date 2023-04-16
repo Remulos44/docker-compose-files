@@ -1,0 +1,92 @@
+version: "3.9"
+
+networks:
+  default:
+    driver: bridge
+  game-servers:
+    name: game-servers
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.4.0/24
+
+x-common-keys-apps: &common-keys-apps
+  networks:
+    - game-servers
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  tty: true
+  stdin_open: true
+
+services:
+  # Minecraft Vanilla Creative
+  # mc-creative:
+    # <<: *common-keys-apps
+    # image: itzg/minecraft-server
+    # container_name: mc-creative
+    # volumes:
+      # - /mnt/e/mc-creative:/data
+    # environment:
+      # EULA: "TRUE"
+      # TYPE: "PURPUR"
+      # PURPUR_BUILD: "LATEST"
+      # RCON_PASSWORD: "aashapon44"
+      # MEMORY: ""
+      # INIT_MEMORY: "1G"
+      # MAX_MEMORY: "4G"
+  
+  # Minecraft Vanilla Survival
+  mc-survival:
+    <<: *common-keys-apps
+    image: itzg/minecraft-server
+    container_name: mc-survival
+    volumes:
+      - /mnt/e/mc-survival:/data
+    environment:
+      EULA: "TRUE"
+      TYPE: "PURPUR"
+      PURPUR_BUILD: "LATEST"
+      RCON_PASSWORD: "aashapon44"
+      MEMORY: ""
+      INIT_MEMORY: "1G"
+      MAX_MEMORY: "4G"
+  
+  # Minecraft Router
+  mc-router:
+    <<: *common-keys-apps
+    image: itzg/mc-router
+    container_name: mc-router
+    command: --mapping=creative.remulos.cc=mc-creative:25565,survival.remulos.cc=mc-survival:25565
+    ports:
+      - "25565:25565"
+  
+  # Minecraft RCON Client
+  mc-rcon:
+    <<: *common-keys-apps
+    image: itzg/rcon
+    container_name: mc-rcon
+    volumes:
+      - /home/remulos/appdata/mc-rcon:/opt/rcon-web-admin/db
+    ports:
+      - "4326:4326"
+      - "4327:4327"
+    environment:
+      RWA_USERNAME: "admin"
+      RWA_PASSWORD: "aashapon44"
+      RWA_ADMIN: "TRUE"
+      # RWA_WEBSOCKET_URL: "ws://ws.rcon.remulos.cc"
+      # RWA_WEBSOCKET_URL_SSL: "wss://ws.rcon.remulos.cc"
+  
+  # Minecraft Backups
+  mc-backup:
+    <<: *common-keys-apps
+    image: itzg/mc-backup
+    container_name: mc-backup
+    volumes:
+      - /mnt/e/mc-backup:/backups
+      - /mnt/e/mc-survival:/data:ro
+    environment:
+      BACKUP_INTERVAL: "2h"
+      RCON_HOST: "mc-survival"
+      PAUSE_IF_NO_PLAYERS: "true"

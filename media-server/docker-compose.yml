@@ -1,0 +1,379 @@
+version: "3.9"
+
+##################
+#<<< NETWORKS >>>#
+##################
+
+networks:
+  default:
+    driver: bridge
+  npm_proxy:
+    name: npm_proxy
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+
+##########################
+#<<< EXTENSION FIELDS >>>#
+##########################
+
+# Common environment values
+x-environment: &default-tz-puid-pgid
+  TZ: $TZ
+  PUID: $PUID
+  PGID: $PGID
+
+# Keys common to some of the core services that we always want to automatically restart on failure
+x-common-keys-core: &common-keys-core
+  networks:
+    - npm_proxy
+  security_opt:
+    - no-new-privileges:true
+  restart: always
+  tty: true
+  stdin_open: true
+
+# Keys common to some of the dependent services/apps
+x-common-keys-apps: &common-keys-apps
+  networks:
+    - npm_proxy
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+  tty: true
+  stdin_open: true
+
+# Keys common to some of the services in media-services.txt
+x-common-keys-media: &common-keys-media
+  networks:
+    - npm_proxy
+  security_opt:
+    - no-new-privileges:true
+  restart: "no"
+  tty: true
+  stdin_open: true
+
+##################
+#<<< SERVICES >>>#
+##################
+
+services:
+  ###############
+  #< FRONTENDS >#
+  ###############
+
+  # Nginx Proxy Manager - Reverse proxy with LetsEncrypt
+  npm:
+    <<: *common-keys-core
+    container_name: nginx-proxy-manager
+    image: 'jc21/nginx-proxy-manager:latest'
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.1.254
+    ports:
+      - '80:80'
+      - '443:443'
+      - '81:81'
+    volumes:
+      - $DOCKERDIR/appdata/npm/config:/config
+      - $DOCKERDIR/appdata/npm/letsencrypt:/etc/letsencrypt
+      - $DOCKERDIR/appdata/npm/data:/data
+    environment:
+      # DB_SQLITE_FILE: "/config/database.sqlite"
+      DISABLE_IPV6: 'true'
+
+  # Portainer - WebUI for containers
+  portainer:
+    <<: *common-keys-core
+    container_name: portainer
+    image: portainer/portainer-ce:latest
+    command: -H unix:///var/run/docker.sock # Comment out if using socket proxy
+    # command: -H tcp://socket-proxy:2375   # Uncomment if using socket proxy
+    networks:
+      - npm_proxy
+    # ports: # Comment out if using npm to access portainer
+      # - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - $DOCKERDIR/appdata/portainer/data:/data
+    environment:
+      - TZ=$TZ
+
+  # Heimdall - Application Dashboard
+  heimdall:
+    <<: *common-keys-core
+    image: lscr.io/linuxserver/heimdall
+    container_name: heimdall
+    ports:
+      - "83:80"
+    volumes:
+      - $DOCKERDIR/appdata/heimdall:/config
+    environment:
+      <<: *default-tz-puid-pgid
+
+  #################
+  #< DOWNLOADERS >#
+  #################
+
+  # TransmissionBT - Torrent downloader
+  transmission-vpn:
+    image: haugene/transmission-openvpn:latest
+    container_name: transmission-vpn
+    restart: unless-stopped
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.1.169
+    ports:
+      - "9091:9091"
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - $DOCKERDIR/appdata/transmission-vpn/data:/data
+      - $DOCKERDIR/appdata/transmission-vpn/config:/config
+      - $DATADIR/downloads:/data/downloads
+    environment:
+      <<: *default-tz-puid-pgid
+      OPENVPN_PROVIDER: PIA
+      OPENVPN_USERNAME: $PIA_UNAME
+      OPENVPN_PASSWORD: $PIA_PWORD
+      LOCAL_NETWORK: "$LOCAL_NETWORK"
+      UMASK_SET: 2
+      TRANSMISSION_RPC_AUTHENTICATION_REQUIRED: "true"
+      TRANSMISSION_RPC_HOST_WHITELIST: "127.0.0.1,$SERVER_IP"
+      # TRANSMISSION_RPC_PASSWORD: $TRANSMISSION_RPC_PASSWORD
+      # TRANSMISSION_RPC_USERNAME: $TRANSMISSION_RPC_USERNAME
+      TRANSMISSION_UMASK: 002
+      TRANSMISSION_RATIO_LIMIT: 1.00
+      TRANSMISSION_RATIO_LIMIT_ENABLED: "true"
+      TRANSMISSION_ALT_SPEED_DOWN: 1000
+      TRANSMISSION_ALT_SPEED_ENABLED: "false"
+      TRANSMISSION_ALT_SPEED_UP: 250
+      TRANSMISSION_SPEED_LIMIT_DOWN: 10000
+      TRANSMISSION_SPEED_LIMIT_DOWN_ENABLED: "true"
+      TRANSMISSION_SPEED_LIMIT_UP: 500
+      TRANSMISSION_SPEED_LIMIT_UP_ENABLED: "true"
+      TRANSMISSION_INCOMPLETE_DIR: /data/downloads/torrents/incomplete
+      TRANSMISSION_INCOMPLETE_DIR_ENABLED: "true"
+      TRANSMISSION_WATCH_DIR: /data/downloads/torrents
+      TRANSMISSION_WATCH_DIR_ENABLED: "true"
+      TRANSMISSION_DOWNLOAD_DIR: /data/downloads/torrents
+      LOG_TO_STDOUT: "true"
+
+  ##########
+  #< PVRS >#
+  ##########
+
+  # Prowlarr - Indexer proxy
+  prowlarr:
+    <<: *common-keys-apps
+    image: ghcr.io/linuxserver/prowlarr:develop
+    container_name: prowlarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.1.162
+    ports:
+      - "9696:9696"
+    volumes:
+      - $DOCKERDIR/appdata/prowlarr:/config
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+      
+  # Flaresolverr - Indexer Proxy
+  flaresolverr:
+    <<: *common-keys-apps
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    ports:
+      - "8191:8191"
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=Europe/London
+
+  # Lidarr - Music management
+  lidarr:
+    <<: *common-keys-apps
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.1.163
+    ports:
+      - "8686:8686"
+    volumes:
+      - $DOCKERDIR/appdata/lidarr:/config
+      - $DATADIR/downloads:/data/downloads
+      - $DATADIR/media:/data/media
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+
+  # Radarr - Movie management
+  radarr:
+    <<: *common-keys-apps
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.1.164
+    ports:
+      - "7878:7878"
+    volumes:
+      - $DOCKERDIR/appdata/radarr:/config
+      - $DATADIR/downloads:/data/downloads
+      - $DATADIR/media:/data/media
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+
+  # Sonarr - TV shows management
+  sonarr:
+    <<: *common-keys-apps
+    image: lscr.io/linuxserver/sonarr
+    container_name: sonarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.1.167
+    ports:
+      - "8989:8989"
+    volumes:
+      - $DOCKERDIR/appdata/sonarr:/config
+      - $DATADIR/downloads:/data/downloads
+      - $DATADIR/media:/data/media
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+      
+  # Readarr - Book management
+  readarr:
+    <<: *common-keys-apps
+    image: lscr.io/linuxserver/readarr:develop
+    container_name: readarr
+    networks:
+      npm_proxy:
+        ipv4_address: 192.168.1.168
+    ports:
+      - "8787:8787"
+    volumes:
+      - $DOCKERDIR/appdata/readarr:/config
+      - $DATADIR/downloads:/data/downloads
+      - $DATADIR/media:/data/media
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      <<: *default-tz-puid-pgid
+
+  ###########
+  #< MEDIA >#
+  ###########
+
+  # Jellyfin - Media server
+  jellyfin:
+    <<: *common-keys-apps
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    ports:
+      - "8096:8096"
+    environment:
+      <<: *default-tz-puid-pgid
+      UMASK_SET: 022
+    volumes:
+      - $DOCKERDIR/appdata/jellyfin:/config
+      - $DATADIR/media:/data/media
+      - /dev/shm:/data/transcode # Offload transcoding to RAM if you have enough
+    devices:
+      - /dev/dri:/dev/dri # For hardware transcoding
+    
+  jellyseerr:
+    <<: *common-keys-apps
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    environment:
+      <<: *default-tz-puid-pgid
+    ports:
+      - "5055:5055"
+    volumes:
+      - $DOCKERDIR/appdata/jellyseerr/config:/app/config
+
+  ###########################
+  #< MEDIA FILE MANAGEMENT >#
+  ###########################
+
+  # Bazarr - Subtitle management
+  bazarr:
+    <<: *common-keys-apps
+    image: lscr.io/linuxserver/bazarr
+    container_name: bazarr
+    ports:
+      - "6767:6767"
+    volumes:
+      - $DOCKERDIR/appdata/bazarr:/config
+      - $DATADIR/media:/data/media
+    environment:
+      <<: *default-tz-puid-pgid
+
+  ###############
+  #< UTILITIES >#
+  ###############
+
+  # Dozzle - Real-time docker log viewer
+  dozzle:
+    <<: *common-keys-apps
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    networks:
+      - npm_proxy
+    ports:
+      - "8080:8080"
+    environment:
+      DOZZLE_LEVEL: info
+      DOZZLE_TAILSIZE: 300
+      DOZZLE_FILTER: "status=running"
+      # DOCKER_HOST: tcp://socket-proxy:2375 # Use if using socket proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Comment out if using socket proxy
+
+  #################
+  #< MAINTENANCE >#
+  #################
+
+  # Docker-GC - Automatic docker garbage collection
+  # Create docker-gc-exclude file
+  # dockergc:
+    # <<: *common-keys-core
+    # image: clockworksoul/docker-gc-cron:latest
+    # container_name: docker-gc
+    # volumes:
+      # - /var/run/docker.sock:/var/run/docker.sock # Comment out if using socket proxy
+      # - $DOCKERDIR/appdata/docker-gc/docker-gc-exclude:/etc/docker-gc-exclude
+    # environment:
+      # CRON: 0 0 0 * * ?
+      # FORCE_IMAGE_REMOVAL: 1
+      # FORCE_CONTAINER_REMOVAL: 0
+      # GRACE_PERIOD_SECONDS: 604800
+      # DRY_RUN: 0
+      # CLEAN_UP_VOLUMES: 1
+      # TZ: $TZ
+      # # DOCKER_HOST: tcp://socket-proxy:2375 # Use if using socket proxy
+
+  # WatchTower - Automatic docker container updates
+  watchtower:
+    <<: *common-keys-core
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Comment out if using socket proxy
+    environment:
+      TZ: $TZ
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_REMOVE_VOLUMES: "true"
+      WATCHTOWER_INCLUDE_STOPPED: "true"
+      WATCHTOWER_NO_STARTUP_MESSAGE: "false"
+      WATCHTOWER_SCHEDULE: "0 30 12 * * *" # Everyday at 12:30
+      # DOCKER_HOST: tcp://socket-proxy:2375 # Use if using socket proxy
+      DOCKER_API_VERSION: "1.40"
